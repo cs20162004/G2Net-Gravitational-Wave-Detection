@@ -1,7 +1,7 @@
 import time
-from utils import AverageMeter, timeSince, get_score
+from utils import AverageMeter, timeSince, get_score, init_logger
 from dataset.datasets import TrainDataset, get_transforms
-from model.models import Efficientnet7
+from model.models import Efficientnet7, Efficientnetv2_b1
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch
 from torch import nn
@@ -17,7 +17,6 @@ def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, 
     scores = AverageMeter()
     model.train()
     start = end = time.time()
-    global_step = 0
     for step, (images, labels) in enumerate(train_loader):
         data_time.update(time.time() - end)
         images = images.to(device)
@@ -31,9 +30,8 @@ def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, 
         loss.backward()
 
         grad_norm = torch.nn.utils.clip_grad_norm(model.parameters(), 1000)
-
+        optimizer.step()
         optimizer.zero_grad()
-        global_step += 1
         batch_time.update(time.time() - end)
         end = time.time()
 
@@ -42,7 +40,7 @@ def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, 
                   'Elapsed {remain:s} '
                   'Loss: {loss.val:.4f}({loss.avg:.4f}) '
                   'Grad: {grad_norm:.4f}  '
-                  'LR: {lr:.6f}  '
+                  'LR: {lr:.6f}'
                   .format(epoch+1, step, len(train_loader), 
                           remain=timeSince(start, float(step+1)/len(train_loader)),
                           loss=losses,
@@ -92,8 +90,9 @@ def valid_fn(valid_loader, model, criterion, device):
 # Train loop
 # ====================================================
 def train_loop(folds, fold):
-    
-    print(f"========== fold: {fold} training ==========")
+
+    logger = init_logger("../weights/train_64_128.log")
+    logger.info(f"========== fold: {fold} training ==========")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # ====================================================
     # loader
@@ -111,11 +110,11 @@ def train_loop(folds, fold):
     train_loader = DataLoader(train_dataset,
                               batch_size=64, 
                               shuffle=True, 
-                              num_workers=4, pin_memory=True, drop_last=True)
+                              num_workers=8, pin_memory=True, drop_last=True)
     valid_loader = DataLoader(valid_dataset, 
-                              batch_size=64 * 2, 
+                              batch_size=64, 
                               shuffle=False, 
-                              num_workers=4, pin_memory=True, drop_last=False)
+                              num_workers=8, pin_memory=True, drop_last=False)
     
     # ====================================================
     # scheduler 
@@ -127,7 +126,7 @@ def train_loop(folds, fold):
     # ====================================================
     # model & optimizer
     # ====================================================
-    model = Efficientnet7(pretrained=True)
+    model = Efficientnetv2_b1(pretrained=True)
     model.to(device)
 
     optimizer = Adam(model.parameters(), lr=1e-4, weight_decay=1e-6, amsgrad=False)
@@ -141,7 +140,7 @@ def train_loop(folds, fold):
     best_score = 0.
     best_loss = np.inf
     
-    for epoch in range(3):
+    for epoch in range(7):
         
         start_time = time.time()
         
@@ -158,19 +157,19 @@ def train_loop(folds, fold):
 
         elapsed = time.time() - start_time
 
-        print(f'Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}  time: {elapsed:.0f}s')
-        print(f'Epoch {epoch+1} - Score: {score:.4f}')
+        logger.info(f'Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}  time: {elapsed:.0f}s')
+        logger.info(f'Epoch {epoch+1} - Score: {score:.4f}')
 
         if score > best_score:
             best_score = score
-            print(f'Epoch {epoch+1} - Save Best Score: {best_score:.4f} Model')
+            logger.info(f'Epoch {epoch+1} - Save Best Score: {best_score:.4f} Model')
             torch.save({'model': model.state_dict(), 
                         'preds': preds},
                         "../weights/"+f'EfficientNet7_fold{fold}_best_score.pth')
         
         if avg_val_loss < best_loss:
             best_loss = avg_val_loss
-            print(f'Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Model')
+            logger.info(f'Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Model')
             torch.save({'model': model.state_dict(), 
                         'preds': preds},
                         "../weights/"+f'EfficientNet7_fold{fold}_best_loss.pth')
@@ -193,7 +192,7 @@ def main():
         preds = result_df['preds'].values
         labels = result_df['target'].values
         score = get_score(labels, preds)
-        print(f'Score: {score:<.4f}')
+        logger.info(f'Score: {score:<.4f}')
     
     # train 
     oof_df = pd.DataFrame()
@@ -201,10 +200,10 @@ def main():
         if fold in [0]:
             _oof_df = train_loop(train, fold)
             oof_df = pd.concat([oof_df, _oof_df])
-            print(f"========== fold: {fold} result ==========")
+            logger.info(f"========== fold: {fold} result ==========")
             get_result(_oof_df)
     # CV result
-    print(f"========== CV ==========")
+    logger.info(f"========== CV ==========")
     get_result(oof_df)
     # save result
     oof_df.to_csv("../weights/"+'oof_df.csv', index=False)
