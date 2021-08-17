@@ -5,6 +5,8 @@ import math
 import time
 import torch
 import numpy as np
+import sys
+import builtins
 
 def get_score(y_true, y_pred):
     score = roc_auc_score(y_true, y_pred)
@@ -48,14 +50,25 @@ def timeSince(since, percent):
     rs = es - s
     return '%s (remain %s)' % (asMinutes(s), asMinutes(rs))
 
-def init_logger(log_file='../weights/train.log'):
-    from logging import getLogger, INFO, FileHandler,  Formatter,  StreamHandler
-    logger = getLogger(__name__)
-    logger.setLevel(INFO)
-    handler1 = StreamHandler()
-    handler1.setFormatter(Formatter("%(message)s"))
-    handler2 = FileHandler(filename=log_file)
-    handler2.setFormatter(Formatter("%(message)s"))
-    logger.addHandler(handler1)
-    logger.addHandler(handler2)
-    return logger
+def open(file, mode=None, encoding=None):
+    if '/' in file:
+        dir = os.path.dirname(file)
+        if not os.path.isdir(dir): os.makedirs(dir)
+
+    f = builtins.open(file, mode=mode, encoding=encoding)
+    return f
+
+class Logger(object):
+    def __init__(self, file):
+        self.terminal = sys.stdout
+        self.file = open(file, 'w')
+    
+    def write(self, message, is_terminal = 1, is_file = 1):
+        if is_terminal == 1:
+            self.terminal.write(message)
+            self.terminal.flush()
+        
+        if is_file == 1:
+            self.file.write(message)
+            self.file.flush()
+

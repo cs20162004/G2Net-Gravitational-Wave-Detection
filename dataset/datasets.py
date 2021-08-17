@@ -8,18 +8,18 @@ from albumentations.augmentations.geometric.resize import Resize
 import cv2
 
 
-def get_transforms(*, data):
+def get_transforms(*, data, size):
     
     if data == 'train':
         return A.Compose([
-            A.Resize(128, 128, cv2.INTER_CUBIC),
+            A.Resize(size, size, cv2.INTER_CUBIC),
             ToTensorV2(),
 
         ])
 
     elif data == 'valid':
         return A.Compose([
-            Resize(128, 128, cv2.INTER_CUBIC),
+            Resize(size, size, cv2.INTER_CUBIC),
             ToTensorV2(),
         ])
 
