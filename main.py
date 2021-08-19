@@ -122,7 +122,7 @@ def train_loop(args, folds, fold, size, gpu, total_gpus, logger):
     # scheduler 
     # ====================================================
     def get_scheduler(optimizer):
-        scheduler = CosineAnnealingLR(optimizer, T_max=3, eta_min=1e-6, last_epoch=-1)
+        scheduler = CosineAnnealingLR(optimizer, T_max=5, eta_min=1e-6)
         return scheduler
 
     # ====================================================
@@ -132,7 +132,7 @@ def train_loop(args, folds, fold, size, gpu, total_gpus, logger):
     model.to(device)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[gpu])
 
-    optimizer = Adam(model.parameters(), lr=1e-4, weight_decay=1e-6, amsgrad=False)
+    optimizer = Adam(model.parameters(), lr=5e-5, weight_decay=1e-6, amsgrad=False)
     scheduler = get_scheduler(optimizer)
 
     # ====================================================
@@ -162,7 +162,7 @@ def train_loop(args, folds, fold, size, gpu, total_gpus, logger):
 
         if gpu == 0:
             print(f'Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}  time: {elapsed:.0f}s')
-            logger.write(f'Epoch {epoch+1} - Score: {score:.4f}')
+            logger.write(f'Epoch {epoch+1} - Score: {score:.4f}\n')
 
         if score > best_score:
             best_score = score
@@ -170,7 +170,7 @@ def train_loop(args, folds, fold, size, gpu, total_gpus, logger):
                 print(f'Epoch {epoch+1} - Save Best Score: {best_score:.4f} Model')
                 torch.save({'model': model.state_dict(), 
                             'preds': preds},
-                            os.path.join(args.out_dir, f'{args.model}_fold{fold}_best_score.pth'))
+                            os.path.join(args.out_dir, f'{args.model}_size_{args.image_size}_fold{fold}_best_score.pth'))
         
         if avg_val_loss < best_loss:
             best_loss = avg_val_loss
@@ -178,7 +178,7 @@ def train_loop(args, folds, fold, size, gpu, total_gpus, logger):
                 print(f'Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Model')
                 torch.save({'model': model.state_dict(), 
                             'preds': preds},
-                            os.path.join(args.out_dir, f'{args.model}_fold{fold}_best_loss.pth'))
+                            os.path.join(args.out_dir, f'{args.model}_size_{args.image_size}_fold{fold}_best_loss.pth'))
 
     return best_score
 
@@ -189,25 +189,25 @@ def main(gpu, total_gpus, args):
     torch.distributed.init_process_group(backend = 'nccl', init_method = 'env://', world_size = total_gpus, rank = gpu)
 
     # initialize logger and read csv file
-    logger = Logger(os.path.join(args.out_dir, "train.log"))
+    logger = Logger(os.path.join(args.out_dir, f"train_size_{args.image_size}.log"))
     train = pd.read_csv(args.train_csv_path)
 
     # train 
     oof_df = pd.DataFrame()
     for size in args.image_size:
-        if gpu == 0:    logger.write(f"=============== Size: {size}  ===============")
+        if gpu == 0:    logger.write(f"=============== Size: {size}  ===============\n")
         for fold in range(args.num_folds):
             if fold in args.fold_list:
                 best_score = train_loop(args, train, fold, size, gpu, total_gpus, logger)
                 if gpu == 0:    
-                    logger.write(f"========== fold: {fold} result ==========")
-                    logger.write(f'Score: {best_score:<.4f}')
+                    logger.write(f"========== fold: {fold} result ==========\n")
+                    logger.write(f'Score: {best_score:<.4f}\n')
 
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--image_size', default = [384], type = list, help = "image size to train on (default: 256)")
+    parser.add_argument('--image_size', default = [128], type = list, help = "image size to train on (default: 256)")
     parser.add_argument('--out_dir', default = '../weights', type = str, help = "log file to save training result")
     parser.add_argument('--local_rank', type = int, default=0)
     parser.add_argument('--loss', type = str, default = 'BCEWithLogitsLoss', help = "loss function (default: BCEWithLogitsLoss")
