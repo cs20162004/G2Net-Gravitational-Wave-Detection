@@ -17,14 +17,14 @@ def get_transforms(*, data, size):
     
     if data == 'train':
         return A.Compose([
-            A.Resize(size, size, cv2.INTER_CUBIC),
+            # A.Resize(size, size, cv2.INTER_CUBIC),
             ToTensorV2(),
 
         ])
 
     elif data == 'valid':
         return A.Compose([
-            Resize(size, size, cv2.INTER_CUBIC),
+            # Resize(size, size, cv2.INTER_CUBIC),
             ToTensorV2(),
         ])
 
@@ -33,7 +33,7 @@ class TrainDataset(Dataset):
         self.df = df
         self.file_names = df['file_path'].values
         self.labels = df['target'].values
-        self.wave_transform = CQT1992v2(sr = 4096, fmin = 20, fmax = 1024, hop_length = 64, bins_per_octave = 8)
+        self.wave_transform = CQT1992v2(sr = 2048, fmin = 20, fmax = 1024, hop_length = 64, bins_per_octave=8)
         self.transform = transform
         self.fs = 4096
         self.fband = [20.0, 500.0]
@@ -45,7 +45,7 @@ class TrainDataset(Dataset):
 
     def apply_qtransform(self, waves):
         # waves = np.hstack(waves)
-        # waves = waves / np.max(waves)
+        waves = waves / np.max(waves) #np.max((np.max(waves), np.abs(np.min(waves))))
         waves = torch.from_numpy(waves).float()
         image = self.wave_transform(waves)
         return image
@@ -66,9 +66,8 @@ class TrainDataset(Dataset):
 
 
     def bandpass(self, strain, fband, fs):
-        bb, ab = butter(4, [fband[0]*2./fs, fband[1]*2./fs], btype='band')
-        normalization = np.sqrt((fband[1] - fband[0])/(fs/2))
-        strain_bp = filtfilt(bb, ab, strain) / normalization
+        bHP, aHP = butter(8, (20, 500), btype='bandpass', fs= 2048)
+        strain_bp = filtfilt(bHP, aHP, strain)
         return strain_bp
 
     def whiten_bandpass(self, waves):
@@ -84,51 +83,27 @@ class TrainDataset(Dataset):
             Pxx, freqs = mlab.psd(strain, Fs = self.fs, NFFT = NFFT, window=psd_window, noverlap=4096)
             psd = interp1d(freqs, Pxx)
 
-            whiten_strain = self.whiten(strain, psd, self.dt)
-            band_strain = self.bandpass(whiten_strain, self.fband, self.fs)
-
+            # whiten_strain = self.whiten(strain, psd, self.dt)
+            band_strain = self.bandpass(strain, self.fband, self.fs)
+            
             image.append(self.apply_qtransform(band_strain))
         image = torch.cat(image, dim=0)
         return image
-
-    def __getitem__(self, ind):
-        waves = np.load(self.file_names[ind])
-        image = self.whiten_bandpass(waves)
-        image = image.permute(1, 2, 0)
-        image = image.squeeze().numpy()
-        if self.transform:
-            image = self.transform(image = image)['image']
-        label = torch.tensor(self.labels[ind]).float()
-        return image, label
-
-
-class GradCAMDataset(Dataset):
-    def __init__(self, df):
-        self.df = df
-        self.image_ids = df['id'].values
-        self.file_names = df['file_path'].values
-        self.labels = df['target'].values
-        self.wave_transform = CQT1992v2(sr = 4096, fmin = 20, fmax = 1024, hop_length = 32, bins_per_octave = 8)
-        self.transform = get_transforms(data='valid')
-        
-    def __len__(self):
-        return len(self.df)
     
-    def apply_qtransform(self, waves, transform):
+    def apply_qtransformv2(self, waves, transform):
         waves = np.hstack(waves)
         waves = waves / np.max(waves)
         waves = torch.from_numpy(waves).float()
         image = transform(waves)
         return image
 
-    def __getitem__(self, idx):
-        image_id = self.image_ids[idx]
-        file_path = self.file_names[idx]
-        waves = np.load(file_path)
-        image = self.apply_qtransform(waves, self.wave_transform)
+    def __getitem__(self, ind):
+        waves = np.load(self.file_names[ind])
+        image = self.whiten_bandpass(waves)
+        image = image.permute(1, 2, 0)
+        # image = self.apply_qtransformv2(waves, self.wave_transform)
         image = image.squeeze().numpy()
-        vis_image = image.copy()
         if self.transform:
-            image = self.transform(image=image)['image']
-        label = torch.tensor(self.labels[idx]).float()
-        return image_id, image, vis_image, label
+            image = self.transform(image = image)['image']
+        label = torch.tensor(self.labels[ind]).float()
+        return image, label

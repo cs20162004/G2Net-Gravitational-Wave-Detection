@@ -26,3 +26,15 @@ class Efficientnetv2_b1(nn.Module):
     def forward(self, x):
         output = self.model(x)
         return output
+
+
+class Efficientnet_b0(nn.Module):
+    def __init__(self, pretrained=False):
+        super().__init__()
+        self.model = timm.create_model("tf_efficientnet_b0", pretrained=pretrained, in_chans=3)
+        self.n_features = self.model.classifier.in_features
+        self.model.classifier = nn.Linear(self.n_features, 1)
+
+    def forward(self, x):
+        output = self.model(x)
+        return output

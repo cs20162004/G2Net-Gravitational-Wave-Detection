@@ -1,7 +1,7 @@
 import time
 from utils import AverageMeter, timeSince, get_score, Logger
 from dataset.datasets import TrainDataset, get_transforms
-from model.models import Efficientnet7, Efficientnetv2_b1
+from model.models import Efficientnet7, Efficientnetv2_b1, Efficientnet_b0
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch
 from torch import nn
@@ -31,7 +31,6 @@ def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, 
         losses.update(loss.item(), batch_size)
         loss.backward()
 
-        grad_norm = torch.nn.utils.clip_grad_norm(model.parameters(), 1000)
         optimizer.step()
         optimizer.zero_grad()
         batch_time.update(time.time() - end)
@@ -41,13 +40,11 @@ def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, 
             print('Epoch: [{0}][{1}/{2}] '
                   'Elapsed {remain:s} '
                   'Loss: {loss.val:.4f}({loss.avg:.4f}) '
-                  'Grad: {grad_norm:.4f}  '
                   'LR: {lr:.6f}'
                   .format(epoch+1, step, len(train_loader), 
                           remain=timeSince(start, float(step+1)/len(train_loader)),
                           loss=losses,
-                          grad_norm=grad_norm,
-                          lr=scheduler.get_lr()[0]))
+                          lr=scheduler.get_last_lr()[0]))
         
     return losses.avg
 
@@ -112,7 +109,7 @@ def train_loop(args, folds, fold, size, gpu, total_gpus, logger):
     train_loader = DataLoader(train_dataset,
                               batch_size=args.batch_size, 
                             #   shuffle=True, 
-                              num_workers=args.num_workers, pin_memory=True, drop_last=True, sampler = train_sampler)
+                              num_workers=args.num_workers, pin_memory=True, sampler = train_sampler)
     valid_loader = DataLoader(valid_dataset, 
                               batch_size=args.batch_size * 2, 
                               shuffle=False, 
@@ -122,13 +119,19 @@ def train_loop(args, folds, fold, size, gpu, total_gpus, logger):
     # scheduler 
     # ====================================================
     def get_scheduler(optimizer):
-        scheduler = CosineAnnealingLR(optimizer, T_max=5, eta_min=1e-6)
+        scheduler = CosineAnnealingLR(optimizer, T_max=3, eta_min=1e-6, last_epoch=-1)
         return scheduler
 
     # ====================================================
     # model & optimizer
     # ====================================================
-    model = Efficientnetv2_b1(pretrained=True)
+    if args.model == "Efficientnet7":
+        model = Efficientnet7(pretrained=True)
+    elif args.model == "Efficientnetv2_b1":
+        model = Efficientnetv2_b1(pretrained=True)
+    elif args.model == "Efficientnet_b0":
+        model = Efficientnet_b0(pretrained = True)
+
     model.to(device)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[gpu])
 
@@ -217,7 +220,7 @@ if __name__ == '__main__':
     parser.add_argument('--train_csv_path', type = str, default = "../dt/split_train.csv", help = "training csv path")
     parser.add_argument('--num_folds', type = int, default = 5, help = "total number of folds")
     parser.add_argument('--fold_list', type = list, default = [0,1,2,3,4], help="fold list to train on")
-    parser.add_argument('--num_epochs', type = int, default = 5, help = "number of epochs (default: 5)")
+    parser.add_argument('--num_epochs', type = int, default = 3, help = "number of epochs (default: 5)")
     parser.add_argument('--model', type = str, default = "Efficientnetv2_b1", help = "model architecture to train") 
     args = parser.parse_args()
 
