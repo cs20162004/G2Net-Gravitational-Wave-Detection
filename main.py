@@ -135,7 +135,7 @@ def train_loop(args, folds, fold, size, gpu, total_gpus, logger):
     model.to(device)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[gpu])
 
-    optimizer = Adam(model.parameters(), lr=5e-5, weight_decay=1e-6, amsgrad=False)
+    optimizer = Adam(model.parameters(), lr=1e-3, weight_decay=1e-6, amsgrad=False)
     scheduler = get_scheduler(optimizer)
 
     # ====================================================
@@ -210,8 +210,8 @@ def main(gpu, total_gpus, args):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--image_size', default = [128], type = list, help = "image size to train on (default: 256)")
-    parser.add_argument('--out_dir', default = '../weights', type = str, help = "log file to save training result")
+    parser.add_argument('--image_size', default = [256], type = list, help = "image size to train on (default: 256)")
+    parser.add_argument('--out_dir', default = '../weights7e-3', type = str, help = "log file to save training result")
     parser.add_argument('--local_rank', type = int, default=0)
     parser.add_argument('--loss', type = str, default = 'BCEWithLogitsLoss', help = "loss function (default: BCEWithLogitsLoss")
     parser.add_argument('--num_workers', type = int, default=4, help = "number of data loading workers (default: 4)")
