@@ -72,3 +72,7 @@ class Logger(object):
             self.file.write(message)
             self.file.flush()
 
+def create_out_dir(args):
+    if not os.path.isdir(f'../{args.model}_{args.image_size}_{args.lr}'):
+        os.makedirs(f'../{args.model}_{args.image_size}_{args.lr}')
+    return f'../{args.model}_{args.image_size}_{args.lr}'

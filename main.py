@@ -1,5 +1,5 @@
 import time
-from utils import AverageMeter, timeSince, get_score, Logger
+from utils import AverageMeter, timeSince, get_score, Logger, create_out_dir
 from dataset.datasets import TrainDataset, get_transforms
 from model.models import Efficientnet7, Efficientnetv2_b1, Efficientnet_b0
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -135,7 +135,7 @@ def train_loop(args, folds, fold, size, gpu, total_gpus, logger):
     model.to(device)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[gpu])
 
-    optimizer = Adam(model.parameters(), lr=1e-3, weight_decay=1e-6, amsgrad=False)
+    optimizer = Adam(model.parameters(), lr=args.lr, weight_decay=1e-6, amsgrad=False)
     scheduler = get_scheduler(optimizer)
 
     # ====================================================
@@ -192,27 +192,30 @@ def main(gpu, total_gpus, args):
     torch.distributed.init_process_group(backend = 'nccl', init_method = 'env://', world_size = total_gpus, rank = gpu)
 
     # initialize logger and read csv file
-    logger = Logger(os.path.join(args.out_dir, f"train_size_{args.image_size}.log"))
+
     train = pd.read_csv(args.train_csv_path)
 
-    # train 
+    # train
     oof_df = pd.DataFrame()
-    for size in args.image_size:
-        if gpu == 0:    logger.write(f"=============== Size: {size}  ===============\n")
-        for fold in range(args.num_folds):
-            if fold in args.fold_list:
-                best_score = train_loop(args, train, fold, size, gpu, total_gpus, logger)
-                if gpu == 0:    
-                    logger.write(f"========== fold: {fold} result ==========\n")
-                    logger.write(f'Score: {best_score:<.4f}\n')
+    
+    args.out_dir = create_out_dir(args)
+    logger = Logger(os.path.join(args.out_dir, f"train_size_{args.image_size}.log"))        
+    if gpu == 0:    logger.write(f"=============== Size: {args.image_size}  ===============\n")
+    for fold in range(args.num_folds):
+        if fold in args.fold_list:
+            best_score = train_loop(args, train, fold, args.image_size, gpu, total_gpus, logger)
+            if gpu == 0:    
+                logger.write(f"========== fold: {fold} result ==========\n")
+                logger.write(f'Score: {best_score:<.4f}\n')
 
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--image_size', default = [256], type = list, help = "image size to train on (default: 256)")
+    parser.add_argument('--image_size', default = 256, type = int, help = "image size to train on (default: 256)")
     parser.add_argument('--out_dir', default = '../weights7e-3', type = str, help = "log file to save training result")
     parser.add_argument('--local_rank', type = int, default=0)
+    parser.add_argument('--lr', type = float, default = 1e-3)
     parser.add_argument('--loss', type = str, default = 'BCEWithLogitsLoss', help = "loss function (default: BCEWithLogitsLoss")
     parser.add_argument('--num_workers', type = int, default=4, help = "number of data loading workers (default: 4)")
     parser.add_argument('--batch_size', type = int, default = 64, help = "batch size (default: 64)")
