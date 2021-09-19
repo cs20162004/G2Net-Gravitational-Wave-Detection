@@ -1,7 +1,7 @@
 import time
 from utils import AverageMeter, timeSince, get_score, Logger, create_out_dir
 from dataset.datasets import TrainDataset, get_transforms
-from model.models import Efficientnet7, Efficientnetv2_b1, Efficientnet_b0
+from model.models import Efficientnet7, Efficientnetv2_b1, Efficientnet_b0, cnn_1d
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch
 from torch import nn
@@ -101,8 +101,8 @@ def train_loop(args, folds, fold, size, gpu, total_gpus, logger):
     valid_folds = folds.loc[val_idx].reset_index(drop=True)
     valid_labels = valid_folds['target'].values
 
-    train_dataset = TrainDataset(train_folds, transform=get_transforms(data='train', size=size))
-    valid_dataset = TrainDataset(valid_folds, transform=get_transforms(data='train', size=size))
+    train_dataset = TrainDataset(train_folds) #, transform=get_transforms(data='train', size=size))
+    valid_dataset = TrainDataset(valid_folds) #, transform=get_transforms(data='train', size=size))
 
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas = total_gpus, rank = gpu)
 
@@ -119,7 +119,7 @@ def train_loop(args, folds, fold, size, gpu, total_gpus, logger):
     # scheduler 
     # ====================================================
     def get_scheduler(optimizer):
-        scheduler = CosineAnnealingLR(optimizer, T_max=3, eta_min=1e-6, last_epoch=-1)
+        scheduler = CosineAnnealingLR(optimizer, T_max=3, eta_min=1e-7, last_epoch=-1)
         return scheduler
 
     # ====================================================
@@ -131,11 +131,13 @@ def train_loop(args, folds, fold, size, gpu, total_gpus, logger):
         model = Efficientnetv2_b1(pretrained=True)
     elif args.model == "Efficientnet_b0":
         model = Efficientnet_b0(pretrained = True)
+    else:
+        model = cnn_1d()
 
     model.to(device)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[gpu])
 
-    optimizer = Adam(model.parameters(), lr=args.lr, weight_decay=1e-6, amsgrad=False)
+    optimizer = Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     scheduler = get_scheduler(optimizer)
 
     # ====================================================
@@ -192,7 +194,6 @@ def main(gpu, total_gpus, args):
     torch.distributed.init_process_group(backend = 'nccl', init_method = 'env://', world_size = total_gpus, rank = gpu)
 
     # initialize logger and read csv file
-
     train = pd.read_csv(args.train_csv_path)
 
     # train
@@ -215,7 +216,7 @@ if __name__ == '__main__':
     parser.add_argument('--image_size', default = 256, type = int, help = "image size to train on (default: 256)")
     parser.add_argument('--out_dir', default = '../weights7e-3', type = str, help = "log file to save training result")
     parser.add_argument('--local_rank', type = int, default=0)
-    parser.add_argument('--lr', type = float, default = 1e-3)
+    parser.add_argument('--lr', type = float, default = 1e-4)
     parser.add_argument('--loss', type = str, default = 'BCEWithLogitsLoss', help = "loss function (default: BCEWithLogitsLoss")
     parser.add_argument('--num_workers', type = int, default=4, help = "number of data loading workers (default: 4)")
     parser.add_argument('--batch_size', type = int, default = 64, help = "batch size (default: 64)")
@@ -224,10 +225,11 @@ if __name__ == '__main__':
     parser.add_argument('--num_folds', type = int, default = 5, help = "total number of folds")
     parser.add_argument('--fold_list', type = list, default = [0,1,2,3,4], help="fold list to train on")
     parser.add_argument('--num_epochs', type = int, default = 3, help = "number of epochs (default: 5)")
-    parser.add_argument('--model', type = str, default = "Efficientnetv2_b1", help = "model architecture to train") 
+    parser.add_argument('--model', type = str, default = "cnn_1d", help = "model architecture to train") 
+    parser.add_argument('--port', type = int, default = "1234", help = "port number")
     args = parser.parse_args()
 
     total_gpus = torch.cuda.device_count()
     os.environ['MASTER_ADDR'] = '127.0.1.1'
-    os.environ['MASTER_PORT'] = '1234'
+    os.environ['MASTER_PORT'] = args.port
     torch.multiprocessing.spawn(main, nprocs = total_gpus, args = (total_gpus, args))

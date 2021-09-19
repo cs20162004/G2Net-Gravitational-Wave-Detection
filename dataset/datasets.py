@@ -12,7 +12,6 @@ from albumentations.pytorch import ToTensorV2
 from albumentations.augmentations.geometric.resize import Resize
 import cv2
 
-
 def get_transforms(*, data, size):
     
     if data == 'train':
@@ -33,7 +32,7 @@ class TrainDataset(Dataset):
         self.df = df
         self.file_names = df['file_path'].values
         self.labels = df['target'].values
-        self.wave_transform = CQT1992v2(sr = 2048, fmin = 20, fmax = 1024, hop_length = 64, bins_per_octave=8)
+        self.wave_transform = CQT1992v2(sr = 2048, fmin = 20, fmax = 500, hop_length = 16, bins_per_octave=12)
         self.transform = transform
         self.fs = 4096
         self.fband = [20.0, 500.0]
@@ -91,18 +90,46 @@ class TrainDataset(Dataset):
         return image
     
     def apply_qtransformv2(self, waves, transform):
+        image = self.whiten_bandpass(waves)
+        image = image.permute(1, 2, 0)
         waves = np.hstack(waves)
         waves = waves / np.max(waves)
         waves = torch.from_numpy(waves).float()
         image = transform(waves)
+        image = image.squeeze().numpy()
         return image
+    
+    def cnn_1d_preprocess(self, waves):
+        scaling = [1.5e-20, 1.5e-20, 0.5e-20]
+        for i in range(3):
+            waves[i] = waves[i] / scaling[i]
+        return waves
+
+    def bandpass_1dcnn(self, x, lf=20, hf=500, order=8, sr=2048):
+        '''
+        Cell 33 of https://www.gw-openscience.org/LVT151012data/LOSC_Event_tutorial_LVT151012.html
+        https://scipy-cookbook.readthedocs.io/items/ButterworthBandpass.html
+        '''
+        sos = signal.butter(order, [lf, hf], btype="bandpass", output="sos", fs=sr)
+        normalization = np.sqrt((hf - lf) / (sr / 2))
+        window = signal.tukey(4096, 0.1)
+        if x.ndim ==2:
+            x *= window
+            for i in range(3):
+                x[i] = signal.sosfilt(sos, x[i]) * normalization
+        elif x.ndim == 3: # batch
+            for i in range(x.shape[0]):
+                x[i] *= window
+                for j in range(3):
+                    x[i, j] = signal.sosfilt(sos, x[i, j]) * normalization
+        return x
 
     def __getitem__(self, ind):
         waves = np.load(self.file_names[ind])
-        image = self.whiten_bandpass(waves)
-        image = image.permute(1, 2, 0)
         # image = self.apply_qtransformv2(waves, self.wave_transform)
-        image = image.squeeze().numpy()
+        waves = self.cnn_1d_preprocess(waves)
+        waves = self.bandpass_1dcnn(waves)
+        image = torch.from_numpy(waves).float()
         if self.transform:
             image = self.transform(image = image)['image']
         label = torch.tensor(self.labels[ind]).float()
