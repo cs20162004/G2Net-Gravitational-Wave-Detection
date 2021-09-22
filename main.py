@@ -101,8 +101,8 @@ def train_loop(args, folds, fold, size, gpu, total_gpus, logger):
     valid_folds = folds.loc[val_idx].reset_index(drop=True)
     valid_labels = valid_folds['target'].values
 
-    train_dataset = TrainDataset(train_folds) #, transform=get_transforms(data='train', size=size))
-    valid_dataset = TrainDataset(valid_folds) #, transform=get_transforms(data='train', size=size))
+    train_dataset = TrainDataset(train_folds, args.lf, args.hf, args.order) #, transform=get_transforms(data='train', size=size))
+    valid_dataset = TrainDataset(valid_folds, args.lf, args.hf, args.order) #, transform=get_transforms(data='train', size=size))
 
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas = total_gpus, rank = gpu)
 
@@ -188,7 +188,6 @@ def train_loop(args, folds, fold, size, gpu, total_gpus, logger):
     return best_score
 
 
-
 def main(gpu, total_gpus, args):
     torch.cuda.set_device(gpu)
     torch.distributed.init_process_group(backend = 'nccl', init_method = 'env://', world_size = total_gpus, rank = gpu)
@@ -199,7 +198,9 @@ def main(gpu, total_gpus, args):
     # train
     oof_df = pd.DataFrame()
     
-    args.out_dir = create_out_dir(args)
+    # args.out_dir = create_out_dir(args)
+    if not os.path.isdir(args.out_dir):
+        os.makedirs(args.out_dir)
     logger = Logger(os.path.join(args.out_dir, f"train_size_{args.image_size}.log"))        
     if gpu == 0:    logger.write(f"=============== Size: {args.image_size}  ===============\n")
     for fold in range(args.num_folds):
@@ -226,7 +227,10 @@ if __name__ == '__main__':
     parser.add_argument('--fold_list', type = list, default = [0,1,2,3,4], help="fold list to train on")
     parser.add_argument('--num_epochs', type = int, default = 3, help = "number of epochs (default: 5)")
     parser.add_argument('--model', type = str, default = "cnn_1d", help = "model architecture to train") 
-    parser.add_argument('--port', type = int, default = "1234", help = "port number")
+    parser.add_argument('--port', type = str, default = "1234", help = "port number")
+    parser.add_argument('--lf', type = int, default = 25, help = "lf")
+    parser.add_argument('--hf', type = int, default = 1000, help = "hf")
+    parser.add_argument('--order', type = int, default = 8, help = "order")
     args = parser.parse_args()
 
     total_gpus = torch.cuda.device_count()
